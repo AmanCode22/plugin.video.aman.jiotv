@@ -14,25 +14,25 @@ import time
 @Route.register
 def root(plugin):
          result=[]
-         item=Listitem()
+         item=Listitem("video")
          item.label="Genre Wise"
          item.set_callback(genreRoute)
          result.append(item)
-         item2=Listitem()
+         item2=Listitem("video")
          item2.label="Language Wise"
          item2.set_callback(languageRoute)
          result.append( item2)
-         item3=Listitem()
+         item3=Listitem("video")
          item3.label="Genre and Language Wise"
          item3.set_callback(langenrRoute_langPart)
          result.append(item3)
          if isLoggedin():
-         	logout_item=Listitem()
+         	logout_item=Listitem("video")
          	logout_item.label="Logout"
          	logout_item.set_callback(logoutRoute)
          	result.append(logout_item)
          else:
-         	login_item=Listitem()
+         	login_item=Listitem("video")
          	login_item.label="Login(Needed for playing anything)"
          	login_item.set_callback(loginRoute)
          	result.append(login_item)
@@ -68,7 +68,7 @@ def genreRoute(plugin):
 	final=[]
 	genres=getGenreList().values()
 	for i in genres:
-		item=Listitem()
+		item=Listitem("video")
 		item.label=i
 		item.set_callback(filter,type="genre",query=i)
 		final.append(item)
@@ -79,7 +79,7 @@ def langenrRoute_langPart(plugin):
 	final=[]
 	languages=getLanguageList().values()
 	for i in languages:
-		item=Listitem()
+		item=Listitem("video")
 		item.label=i
 		item.set_callback(langenrRoute_genrePart,language=i)
 		final.append(item)
@@ -90,7 +90,7 @@ def languageRoute(plugin):
 	final=[]
 	languages=getLanguageList().values()
 	for i in languages:
-		item=Listitem()
+		item=Listitem("video")
 		item.label=i
 		item.set_callback(filter,type="language",query=i)
 		final.append(item)
@@ -101,7 +101,7 @@ def langenrRoute_genrePart(plugin,language):
 	final=[]
 	genres=getGenreList().values()
 	for i in genres:
-		item=Listitem()
+		item=Listitem("video")
 		item.label=i
 		item.set_callback(filter,type="multi",query=language,query2=i)
 		final.append(item)
@@ -112,7 +112,7 @@ def filter(plugin,type,query,query2=""):
 	filtered_data=filterChannels(type,query,query2)
 	final_data=[]
 	for i in filtered_data:
-		item=Listitem()
+		item=Listitem("video")
 		item.label=i["channel_name"]
 		item.art.fanart=item.art.thumb=item.art.clearart=item.art.clearlogo="https://jiotv.catchup.cdn.jio.com/dare_images/images/"+i["logoUrl"]
 		item.art.icon="https://jiotv.catchup.cdn.jio.com/dare_images/images/"+i["logoUrl"]
@@ -122,11 +122,11 @@ def filter(plugin,type,query,query2=""):
 	
 @Route.register
 def showPlayOptions(plugin,id,isCatchup):
-	live=Listitem()
+	live=Listitem("video")
 	live.label="Watch Live"
 	live.set_callback(play,id=id,catchup=False)
 	if isCatchup:
-		catchup=Listitem()
+		catchup=Listitem("video")
 		catchup.label="Watch Older Shows Catchup"
 		catchup.set_callback(list_catchup_days,id=id)
 		return [live,catchup]
@@ -135,12 +135,12 @@ def showPlayOptions(plugin,id,isCatchup):
 @Route.register
 def list_catchup_days(plugin,id):
 	final=[]
-	today=Listitem()
+	today=Listitem("video")
 	today.label="Today's past programms"
 	today.set_callback(catchup_shows_list,id=id,day=0)
 	final.append(today)
 	for i in range(1,8):
-		item=Listitem()
+		item=Listitem("video")
 		item.label=str(i)+" day older"
 		item.set_callback(catchup_shows_list,id=id,day=i*-1)
 		final.append(item)
@@ -153,7 +153,7 @@ def catchup_shows_list(plugin,day,id):
 	for i in data["epg"]:
 		if int(i["startEpoch"])>time.time()*1000:
 			continue
-		item=Listitem()
+		item=Listitem("video")
 		item.label=item.info.title=i["showname"]
 		item.info.plot="Showtime:"+datetime.datetime.fromtimestamp((int(i["startEpoch"]))/1000).strftime("%I:%M %p")+" - "+datetime.datetime.fromtimestamp((int(i["endEpoch"]))/1000).strftime("%I:%M %p")
 		item.art.clearart=item.art.clearlogo="https://jiotv.catchup.cdn.jio.com/dare_images/images/"+i["episodeThumbnail"]
@@ -163,46 +163,56 @@ def catchup_shows_list(plugin,day,id):
 	return final 
 
 @Resolver.register
-def play(plugin,id,catchup,srno=None, showtime=None,begin=None,end=None):
-	if catchup:
-		play_url= getCatchupUrl(id,srno, begin,end,showtime)
-		cookies_part=play_url.split("?")[1]
-		if "bpk-tv" in cookies_part:
-			cookie = '_' + cookies_part.split('&_')[1]
-		elif "/HLS/" in cookies_part:
-			cookie = '_' + cookies_part.split('&_')[1]
-		else:
-			cookie=cookies_part
-		headers=jio_playheaders(cookie,id,srno)
-		final=Listitem()
-		final.label=plugin._title
-		final.set_callback(play_url+"|verifypeer=false")
-		final.property["isPlayable"]=True
-		final.property["inputstream"]="inputstream.adaptive"
-		final.property["inputstream.adaptive.stream_headers"]=urlencode(headers)
-		final.property["inputstream.adaptive.manifest_headers"]=urlencode(headers)
-		final.property["inputstream.adaptive.manifest_type"]="hls"
-		final.property["inputstream.adaptive.license_type"]="drm"
-		final.property["inputstream.adaptive.license_key"]="|" + urlencode(headers) + "|R{SSM}|"
-		return final 
-	else:
-		play_url=getLivePlayUrl(id)
-		cookies_part=play_url.split("?")[1]
-		if "bpk-tv" in cookies_part:
-			cookie = '_' + cookies_part.split('&_')[1]
-		elif "/HLS/" in cookies_part:
-			cookie = '_' + cookies_part.split('&_')[1]
-		else:
-			cookie=cookies_part
-		headers=jio_playheaders(cookie,id,"250623144006")
-		final=Listitem()
-		final.label=plugin._title
-		final.set_callback(play_url+"|verifypeer=false")
-		final.property["isPlayable"]=True
-		final.property["inputstream"]="inputstream.adaptive"
-		final.property["inputstream.adaptive.stream_headers"]=urlencode(headers)
-		final.property["inputstream.adaptive.manifest_headers"]=urlencode(headers)
-		final.property["inputstream.adaptive.manifest_type"]="hls"
-		final.property["inputstream.adaptive.license_type"]="drm"
-		final.property["inputstream.adaptive.license_key"]="|" + urlencode(headers) + "|R{SSM}|"
-		return final
+def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
+    if catchup:
+        play_url = getCatchupUrl(id, srno, begin, end, showtime)
+        cookies_part = play_url.split("?")[1]
+        if "bpk-tv" in cookies_part:
+            cookie = '_' + cookies_part.split('&_')[1]
+        elif "/HLS/" in cookies_part:
+            cookie = '_' + cookies_part.split('&_')[1]
+        else:
+            cookie = cookies_part
+        headers = jio_playheaders(cookie, id, srno)
+        
+        final = Listitem("video")
+        final.label = plugin._title
+        final.set_callback(play_url + "|verifypeer=false")
+        final.property["isPlayable"] = True
+        final.property["inputstream"] = "inputstream.adaptive"
+        final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
+        final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
+        final.property["inputstream.adaptive.manifest_type"] = "hls"
+        final.property["inputstream.adaptive.license_type"] = "drm"
+        final.property["inputstream.adaptive.license_key"] = "|" + urlencode(headers) + "|R{SSM}|"
+        
+        # Add quality selector
+        final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
+        
+        return final
+    else:
+        play_url = getLivePlayUrl(id)
+        cookies_part = play_url.split("?")[1]
+        if "bpk-tv" in cookies_part:
+            cookie = '_' + cookies_part.split('&_')[1]
+        elif "/HLS/" in cookies_part:
+            cookie = '_' + cookies_part.split('&_')[1]
+        else:
+            cookie = cookies_part
+        headers = jio_playheaders(cookie, id, "250623144006")
+        
+        final = Listitem("video")
+        final.label = plugin._title
+        final.set_callback(play_url + "|verifypeer=false")
+        final.property["isPlayable"] = True
+        final.property["inputstream"] = "inputstream.adaptive"
+        final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
+        final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
+        final.property["inputstream.adaptive.manifest_type"] = "hls"
+        final.property["inputstream.adaptive.license_type"] = "drm"
+        final.property["inputstream.adaptive.license_key"] = "|" + urlencode(headers) + "|R{SSM}|"
+        
+        # Add quality selector
+        final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
+        
+        return final
