@@ -7,9 +7,7 @@ on:
   release:
     types: [published, edited]
   schedule:
-    # Run every night at 02:00 AM UTC
-    # Adjust this cron expression to your desired time.
-    # Check crontab.guru for help: https://crontab.guru/
+    # Run every night at 02:00 AM UTC (07:30 AM IST)
     - cron: '0 2 * * *'
 
 jobs:
@@ -23,13 +21,13 @@ jobs:
       - name: Get Addon ID
         id: get_addon_id
         run: |
-          # Extract addon ID from addon.xml
+          # Extract addon ID from addon.xml (this is still necessary)
           ADDON_ID=$(grep -oP 'id="\K[^"]+' addon.xml)
           echo "Addon ID: $ADDON_ID"
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
-        working-directory: ./ # Adjust if your addon.xml is in a subfolder
+        working-directory: ./ # Correct, as addon.xml is in root
 
-      - name: Determine Addon Version
+      - name: Determine Addon Version (from Release Tag or Push Ref)
         id: get_addon_version
         run: |
           ADDON_VERSION=""
@@ -40,12 +38,17 @@ jobs:
             ADDON_VERSION="${ADDON_VERSION#v}"
             echo "Addon Version (from release tag): $ADDON_VERSION"
           else
-            # If triggered by a push or schedule, read version from addon.xml
-            ADDON_VERSION=$(grep -oP 'version="\K[^"]+' addon.xml)
-            echo "Addon Version (from addon.xml): $ADDON_VERSION"
+            # If triggered by a push (main branch or direct tag push),
+            # use the git ref name as the version.
+            # Example: refs/heads/main -> main, refs/tags/1.2.3 -> 1.2.3
+            ADDON_VERSION="${{ github.ref }}"
+            ADDON_VERSION="${ADDON_VERSION#refs/heads/}" # Remove 'refs/heads/' if it's a branch
+            ADDON_VERSION="${ADDON_VERSION#refs/tags/}"  # Remove 'refs/tags/' if it's a tag
+            ADDON_VERSION="${ADDON_VERSION#v}"            # Remove 'v' prefix if present
+            echo "Addon Version (from push ref): $ADDON_VERSION"
           fi
           echo "ADDON_VERSION=$ADDON_VERSION" >> $GITHUB_OUTPUT
-        working-directory: ./ # Adjust if your addon.xml is in a subfolder
+        working-directory: ./ # Addon.xml is in root, but this step doesn't directly use it for version
 
       - name: Check for existing release zip (on schedule)
         id: check_zip
@@ -57,7 +60,6 @@ jobs:
           ZIP_FILENAME="$ADDON_ID-$ADDON_VERSION.zip"
 
           # Get the latest release from the GitHub API
-          # Use GITHUB_TOKEN for authentication (automatically provided)
           LATEST_RELEASE_ASSETS=$(curl -s -H "Accept: application/vnd.github.v3+json" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.assets[].name')
@@ -113,10 +115,6 @@ jobs:
           name: Release ${{ steps.get_addon_version.outputs.ADDON_VERSION }}
           body: Auto-generated release for version ${{ steps.get_addon_version.outputs.ADDON_VERSION }}
           files: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}.zip
-          # If the release already exists, this will update it and add/replace the asset
           prerelease: false
-          # You might want to set this if you want to explicitly target the latest tag as the 'latest' release
-          # latest: true # This might cause issues if you have pre-releases and specific latests. Be careful.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
