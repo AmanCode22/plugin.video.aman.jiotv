@@ -3,10 +3,6 @@ name: Create Kodi Plugin Zip (Release or Smart Nightly - No XML Version)
 on:
   release:
     types: [published, edited] # Always runs on a new GitHub Release
-  schedule:
-    # Run every night at 02:00 AM UTC (07:30 AM IST)
-    - cron: '0 2 * * *'
-
 jobs:
   build:
     runs-on: ubuntu-latest
