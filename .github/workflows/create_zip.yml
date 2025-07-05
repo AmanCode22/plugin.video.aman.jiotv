@@ -1,9 +1,10 @@
-name: Create Kodi Plugin Zip (On Release Push)
+name: Create Kodi Plugin Zip (No Version in Name)
 
 on:
   release:
     types: [published, edited] # This ensures it runs ONLY when a release is pushed
-  workflow_dispatch:
+  workflow_dispatch: # This adds the "Run workflow" button in the GitHub UI
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,21 +22,12 @@ jobs:
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
         working-directory: ./ # Correct, as addon.xml is in root
 
-      - name: Determine Addon Version (from Release Tag)
-        id: get_addon_version
-        run: |
-          # If triggered by a release, use the release tag name as the version
-          ADDON_VERSION="${{ github.event.release.tag_name }}"
-          # Remove 'v' prefix if present, e.g., v1.2.3 -> 1.2.3
-          ADDON_VERSION="${ADDON_VERSION#v}"
-          echo "Addon Version (from release tag): $ADDON_VERSION"
-          echo "ADDON_VERSION=$ADDON_VERSION" >> $GITHUB_OUTPUT
+      # The 'Determine Addon Version' step is removed as version is skipped in the filename
 
       - name: Create Plugin Zip
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
-          ADDON_VERSION="${{ steps.get_addon_version.outputs.ADDON_VERSION }}"
-          ZIP_FILENAME="$ADDON_ID-$ADDON_VERSION.zip" # Define zip filename here
+          ZIP_FILENAME="$ADDON_ID.zip" # Zip filename is now just addon_id.zip
 
           # Create a temporary directory to build the zip from
           TEMP_DIR="./$ADDON_ID"
@@ -58,7 +50,6 @@ jobs:
       - name: Upload Plugin Zip as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}-build
-          path: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}.zip
-          # Optionally, set a retention-days for how long the artifact should be kept
-          # retention-days: 7 # Keep artifact for 7 days
+          name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-build # Artifact name is just addon_id-build
+          path: ${{ steps.get_addon_id.outputs.ADDON_ID }}.zip
+          # retention-days: 7 # Optional: Keep artifact for 7 days
