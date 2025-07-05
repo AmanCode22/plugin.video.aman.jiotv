@@ -3,7 +3,7 @@ name: Create Kodi Plugin Zip (On Release Push)
 on:
   release:
     types: [published, edited] # This ensures it runs ONLY when a release is pushed
-
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
