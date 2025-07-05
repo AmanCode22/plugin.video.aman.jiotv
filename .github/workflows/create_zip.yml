@@ -1,8 +1,11 @@
-name: Create Kodi Plugin Zip (On Release Push)
+name: Create Kodi Plugin Zip (Release or Smart Nightly - No XML Version)
 
 on:
   release:
-    types: [published, edited] # This ensures it runs ONLY when a release is pushed
+    types: [published, edited] # Always runs on a new GitHub Release
+  schedule:
+    # Run every night at 02:00 AM UTC (07:30 AM IST)
+    - cron: '0 2 * * *'
 
 jobs:
   build:
@@ -12,7 +15,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get Addon ID
+      - name: Get Addon ID (Still from addon.xml - essential for naming)
         id: get_addon_id
         run: |
           # Extract addon ID from addon.xml (still necessary for zip naming)
@@ -21,44 +24,87 @@ jobs:
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
         working-directory: ./ # Correct, as addon.xml is in root
 
-      - name: Determine Addon Version (from Release Tag)
+      - name: Determine Addon Version (from Release Tag or Latest Release Tag for Nightly)
         id: get_addon_version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # If triggered by a release, use the release tag name as the version
-          ADDON_VERSION="${{ github.event.release.tag_name }}"
-          # Remove 'v' prefix if present, e.g., v1.2.3 -> 1.2.3
-          ADDON_VERSION="${ADDON_VERSION#v}"
-          echo "Addon Version (from release tag): $ADDON_VERSION"
+          ADDON_VERSION=""
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            # If triggered by a release, use the release tag name as the version
+            ADDON_VERSION="${{ github.event.release.tag_name }}"
+            # Remove 'v' prefix if present, e.g., v1.2.3 -> 1.2.3
+            ADDON_VERSION="${ADDON_VERSION#v}"
+            echo "Addon Version (from release tag): $ADDON_VERSION"
+          else # Triggered by schedule
+            # For scheduled runs, get the latest GitHub Release tag as the target version
+            # This ensures nightly builds check against and build for the official latest.
+            LATEST_TAG=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name')
+
+            if [[ -z "$LATEST_TAG" || "$LATEST_TAG" == "null" ]]; then
+              echo "::error::No latest GitHub Release tag found for scheduled build. Cannot determine version."
+              # Optionally, you could fall back to a timestamp or SHA here if you still want a build.
+              # For now, we'll error out as requested logic implies a target release.
+              exit 1
+            fi
+
+            ADDON_VERSION="${LATEST_TAG#v}" # Remove 'v' prefix if present
+            echo "Addon Version (from latest GitHub Release tag for nightly): $ADDON_VERSION"
+          fi
           echo "ADDON_VERSION=$ADDON_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create Plugin Zip
+      - name: Check for existing build artifact (on schedule)
+        id: check_artifact
+        if: github.event_name == 'schedule'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
           ADDON_VERSION="${{ steps.get_addon_version.outputs.ADDON_VERSION }}"
-          ZIP_FILENAME="$ADDON_ID-$ADDON_VERSION.zip" # Define zip filename here
+          EXPECTED_ARTIFACT_NAME="$ADDON_ID-$ADDON_VERSION-build"
 
-          # Create a temporary directory to build the zip from
+          echo "Checking for artifact: $EXPECTED_ARTIFACT_NAME"
+
+          # Use GitHub API to list artifacts for the repository, filtered by name
+          ARTIFACTS_JSON=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=${EXPECTED_ARTIFACT_NAME}")
+
+          ARTIFACT_EXISTS=$(echo "$ARTIFACTS_JSON" | jq -r --arg name "$EXPECTED_ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .name')
+
+          if [[ -n "$ARTIFACT_EXISTS" ]]; then
+            echo "::notice::Artifact '$EXPECTED_ARTIFACT_NAME' already exists. Skipping zip creation."
+            echo "SKIP_ZIP_CREATION=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::Artifact '$EXPECTED_ARTIFACT_NAME' NOT found. Proceeding with zip creation."
+            echo "SKIP_ZIP_CREATION=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Plugin Zip
+        if: github.event_name == 'release' || steps.check_artifact.outputs.SKIP_ZIP_CREATION == 'false'
+        run: |
+          ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
+          ADDON_VERSION="${{ steps.get_addon_version.outputs.ADDON_VERSION }}"
+          ZIP_FILENAME="$ADDON_ID-$ADDON_VERSION.zip"
+
           TEMP_DIR="./$ADDON_ID"
           mkdir -p "$TEMP_DIR"
 
-          # Copy all plugin files into the temporary directory
-          # Exclude .git and .github folders, and any existing zip files
           rsync -av --exclude '.git/' --exclude '.github/' --exclude '*.zip' . "$TEMP_DIR"
 
-          # Zip the plugin, ensuring the addon ID is the root folder inside the zip
           zip -r "$ZIP_FILENAME" "$TEMP_DIR"
 
-          # Move the created zip to the repository root for artifact upload
           mv "$ZIP_FILENAME" ./
 
-          # Clean up the temporary directory
           rm -rf "$TEMP_DIR"
-        working-directory: ./ # This ensures the zip is created in the repo root
+        working-directory: ./
 
       - name: Upload Plugin Zip as Artifact
+        if: github.event_name == 'release' || steps.check_artifact.outputs.SKIP_ZIP_CREATION == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}-build
           path: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}.zip
-          # Optionally, set a retention-days for how long the artifact should be kept
-          # retention-days: 7 # Keep artifact for 7 days
+          # retention-days: 7 # Optional
