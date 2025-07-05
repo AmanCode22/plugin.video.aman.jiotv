@@ -28,10 +28,20 @@ jobs:
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
         working-directory: ./ # Correct, as addon.xml is in root
 
+      - name: Get Latest Git Tag
+        id: get_tag
+        run: |
+          # Get the latest Git tag. If no tags exist, default to '0.0.0' or similar
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+          echo "Latest Git Tag: $LATEST_TAG"
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
+
       - name: Create Plugin Zip
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
-          ZIP_FILENAME="$ADDON_ID.zip" # Zip filename is just addon_id.zip
+          LATEST_TAG="${{ steps.get_tag.outputs.LATEST_TAG }}"
+          # Modify the ZIP_FILENAME to include the latest tag
+          ZIP_FILENAME="$ADDON_ID-$LATEST_TAG.zip" # Zip filename is addon_id-latest_tag.zip
 
           # Create a temporary directory to build the zip from
           TEMP_DIR="./$ADDON_ID"
@@ -53,15 +63,16 @@ jobs:
         # available for easy download from the workflow run summary.
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-build
-          path: ${{ steps.get_addon_id.outputs.ADDON_ID }}.zip
+          name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_tag.outputs.LATEST_TAG }}-build
+          path: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_tag.outputs.LATEST_TAG }}.zip
           # retention-days: 7 # Optional: Keep artifact for 7 days
 
       - name: Commit and Push Zip to Repository
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
-          ZIP_FILENAME="$ADDON_ID.zip"
-          COMMIT_MESSAGE="build: Add latest ${ADDON_ID} build" # Clear commit message
+          LATEST_TAG="${{ steps.get_tag.outputs.LATEST_TAG }}"
+          ZIP_FILENAME="$ADDON_ID-$LATEST_TAG.zip"
+          COMMIT_MESSAGE="build: Add latest ${ADDON_ID} build (tag: ${LATEST_TAG})" # Clear commit message
 
           # Configure Git user for the commit
           git config user.name "github-actions[bot]"
