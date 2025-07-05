@@ -22,8 +22,6 @@ jobs:
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
         working-directory: ./ # Correct, as addon.xml is in root
 
-      # The 'Determine Addon Version' step is removed as version is skipped in the filename
-
       - name: Create Plugin Zip
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
@@ -40,8 +38,8 @@ jobs:
           # Zip the plugin, ensuring the addon ID is the root folder inside the zip
           zip -r "$ZIP_FILENAME" "$TEMP_DIR"
 
-          # Move the created zip to the repository root for artifact upload
-          mv "$ZIP_FILENAME" ./
+          # The 'mv' command is removed here as it's no longer needed.
+          # The zip file is already created in the working directory (./).
 
           # Clean up the temporary directory
           rm -rf "$TEMP_DIR"
