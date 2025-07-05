@@ -1,12 +1,8 @@
-name: Create Kodi Plugin Zip (On Push or Daily Check)
+name: Create Kodi Plugin Zip (On Release Push)
 
 on:
-  push:
-    branches:
-      - main # Or your main development branch
-  schedule:
-    # Run every night at 02:00 AM UTC (07:30 AM IST)
-    - cron: '0 2 * * *'
+  release:
+    types: [published, edited] # This ensures it runs ONLY when a release is pushed
 
 jobs:
   build:
@@ -25,15 +21,15 @@ jobs:
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
         working-directory: ./ # Correct, as addon.xml is in root
 
-      - name: Determine Addon Version (from addon.xml or Push Ref)
+      - name: Determine Addon Version (from Release Tag)
         id: get_addon_version
         run: |
-          ADDON_VERSION=""
-          # For nightly runs or direct pushes to main, use version from addon.xml
-          ADDON_VERSION=$(grep -oP 'version="\K[^"]+' addon.xml)
-          echo "Addon Version (from addon.xml): $ADDON_VERSION"
+          # If triggered by a release, use the release tag name as the version
+          ADDON_VERSION="${{ github.event.release.tag_name }}"
+          # Remove 'v' prefix if present, e.g., v1.2.3 -> 1.2.3
+          ADDON_VERSION="${ADDON_VERSION#v}"
+          echo "Addon Version (from release tag): $ADDON_VERSION"
           echo "ADDON_VERSION=$ADDON_VERSION" >> $GITHUB_OUTPUT
-        working-directory: ./ # Correct, as addon.xml is in root
 
       - name: Create Plugin Zip
         run: |
