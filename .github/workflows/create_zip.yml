@@ -3,92 +3,110 @@ name: Create Kodi Plugin Zip (Store in Repo)
 on:
   release:
     types: [published, edited] # This runs when a GitHub Release is pushed
+  push: # Trigger on push to any branch
+    branches:
+      - main # or your default branch, e.g., 'master', '*' for all branches
+      - develop # Add other branches if you want builds for them
   workflow_dispatch: # This adds the "Run workflow" button in the GitHub UI
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # IMPORTANT: This permission is crucial for pushing changes back to the repository.
-    # Ensure this is set, or configure 'Read and write permissions' in your repository settings -> Actions -> General.
     permissions:
       contents: write
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # The GITHUB_TOKEN is used here by default and will have write permissions
-        # because of the 'permissions' block above.
+        with:
+          # IMPORTANT: This fetches the entire Git history, including all tags.
+          # This is crucial for 'git describe' to work reliably in all trigger types.
+          fetch-depth: 0
 
       - name: Get Addon ID
         id: get_addon_id
         run: |
-          # Extract addon ID from addon.xml (necessary for zip naming)
           ADDON_ID=$(grep -oP 'id="\K[^"]+' addon.xml)
           echo "Addon ID: $ADDON_ID"
           echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
-        working-directory: ./ # Correct, as addon.xml is in root
+        working-directory: ./
 
       - name: Get Latest Git Tag
         id: get_tag
         run: |
-          # Get the latest Git tag. If no tags exist, default to '0.0.0' or similar
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          echo "Latest Git Tag: $LATEST_TAG"
+          LATEST_TAG=""
+
+          # In 'release' context, github.ref_name directly gives the tag name.
+          # This is the most direct way for 'release' events.
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            LATEST_TAG="${{ github.ref_name }}"
+            echo "Using tag from GitHub ref (Release/Tag trigger): $LATEST_TAG"
+          else
+            # For 'push' or 'workflow_dispatch' (or if not a direct tag trigger),
+            # use 'git describe'. This requires fetch-depth: 0 in actions/checkout.
+            # It finds the latest reachable tag from the current HEAD.
+            # '2>/dev/null' suppresses error messages if no tags are found.
+            # '|| echo "0.0.0"' provides a fallback if no tags exist.
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
+            echo "Using tag from git describe (Push/Dispatch fallback): $LATEST_TAG"
+          fi
+
+          # Optional: Add a more descriptive fallback if '0.0.0' isn't sufficient
+          # For example, if it's a branch build and no tags exist yet.
+          if [ "$LATEST_TAG" == "0.0.0" ]; then
+            echo "Warning: No Git tags found. Falling back to 'untagged' for zip name."
+            # Consider using a branch name for push/dispatch if no tags exist
+            if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+              LATEST_TAG="${{ github.ref_name }}" # Use branch name if no tag
+              LATEST_TAG="${LATEST_TAG//\//-}" # Replace slashes in branch names (e.g., feature/xyz to feature-xyz)
+            else
+              LATEST_TAG="untagged" # General fallback
+            fi
+          fi
+
+          echo "Final determined tag for zip name: $LATEST_TAG"
           echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Create Plugin Zip
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
           LATEST_TAG="${{ steps.get_tag.outputs.LATEST_TAG }}"
-          # Modify the ZIP_FILENAME to include the latest tag
-          ZIP_FILENAME="$ADDON_ID-$LATEST_TAG.zip" # Zip filename is addon_id-latest_tag.zip
+          ZIP_FILENAME="$ADDON_ID-$LATEST_TAG.zip"
 
-          # Create a temporary directory to build the zip from
           TEMP_DIR="./$ADDON_ID"
           mkdir -p "$TEMP_DIR"
 
-          # Copy all plugin files into the temporary directory
-          # Exclude .git and .github folders, and any existing zip files
           rsync -av --exclude '.git/' --exclude '.github/' --exclude '*.zip' . "$TEMP_DIR"
 
-          # Zip the plugin, ensuring the addon ID is the root folder inside the zip
           zip -r "$ZIP_FILENAME" "$TEMP_DIR"
 
-          # Clean up the temporary directory. The zip file is created in the current working directory.
           rm -rf "$TEMP_DIR"
-        working-directory: ./ # This ensures the zip is created in the repo root
+        working-directory: ./
 
       - name: Upload Plugin Zip as Artifact
-        # This step is still included as it's a good practice to have the artifact
-        # available for easy download from the workflow run summary.
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_tag.outputs.LATEST_TAG }}-build
           path: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_tag.outputs.LATEST_TAG }}.zip
-          # retention-days: 7 # Optional: Keep artifact for 7 days
 
       - name: Commit and Push Zip to Repository
         run: |
           ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
           LATEST_TAG="${{ steps.get_tag.outputs.LATEST_TAG }}"
           ZIP_FILENAME="$ADDON_ID-$LATEST_TAG.zip"
-          COMMIT_MESSAGE="build: Add latest ${ADDON_ID} build (tag: ${LATEST_TAG})" # Clear commit message
+          COMMIT_MESSAGE="build: Add latest ${ADDON_ID} build (tag: ${LATEST_TAG})"
 
-          # Configure Git user for the commit
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Stage the zip file for commit
           git add "$ZIP_FILENAME"
 
-          # Check if there are actual changes to commit (i.e., if the zip file was added or modified)
-          # This prevents empty commits if the generated zip is identical to the one already in the repo.
           if ! git diff --staged --quiet; then
             git commit -m "$COMMIT_MESSAGE"
-            # Push the commit to the branch that triggered the workflow (e.g., 'main')
-            # ${{ github.ref_name }} gives the name of the branch or tag
+            # Push the commit to the branch that triggered the workflow
+            # This is safe for push to branch, workflow_dispatch, and releases
             git push origin HEAD:${{ github.ref_name }}
             echo "Successfully committed and pushed $ZIP_FILENAME to the repository."
           else
-            echo "No changes detected for $ZIP_FILENAME (it might be identical to the last committed version). Skipping push."
+            echo "No changes detected for $ZIP_FILENAME. Skipping push."
           fi
