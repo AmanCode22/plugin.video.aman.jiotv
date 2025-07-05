@@ -1,0 +1,122 @@
+name: Create Kodi Plugin Zip (On Push, Release, or Daily Check)
+
+on:
+  push:
+    branches:
+      - main # Or your main development branch
+  release:
+    types: [published, edited]
+  schedule:
+    # Run every night at 02:00 AM UTC
+    # Adjust this cron expression to your desired time.
+    # Check crontab.guru for help: https://crontab.guru/
+    - cron: '0 2 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get Addon ID
+        id: get_addon_id
+        run: |
+          # Extract addon ID from addon.xml
+          ADDON_ID=$(grep -oP 'id="\K[^"]+' addon.xml)
+          echo "Addon ID: $ADDON_ID"
+          echo "ADDON_ID=$ADDON_ID" >> $GITHUB_OUTPUT
+        working-directory: ./ # Adjust if your addon.xml is in a subfolder
+
+      - name: Determine Addon Version
+        id: get_addon_version
+        run: |
+          ADDON_VERSION=""
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            # If triggered by a release, use the release tag name as the version
+            ADDON_VERSION="${{ github.event.release.tag_name }}"
+            # Remove 'v' prefix if present, e.g., v1.2.3 -> 1.2.3
+            ADDON_VERSION="${ADDON_VERSION#v}"
+            echo "Addon Version (from release tag): $ADDON_VERSION"
+          else
+            # If triggered by a push or schedule, read version from addon.xml
+            ADDON_VERSION=$(grep -oP 'version="\K[^"]+' addon.xml)
+            echo "Addon Version (from addon.xml): $ADDON_VERSION"
+          fi
+          echo "ADDON_VERSION=$ADDON_VERSION" >> $GITHUB_OUTPUT
+        working-directory: ./ # Adjust if your addon.xml is in a subfolder
+
+      - name: Check for existing release zip (on schedule)
+        id: check_zip
+        # This step only runs if the workflow was triggered by a schedule
+        if: github.event_name == 'schedule'
+        run: |
+          ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
+          ADDON_VERSION="${{ steps.get_addon_version.outputs.ADDON_VERSION }}"
+          ZIP_FILENAME="$ADDON_ID-$ADDON_VERSION.zip"
+
+          # Get the latest release from the GitHub API
+          # Use GITHUB_TOKEN for authentication (automatically provided)
+          LATEST_RELEASE_ASSETS=$(curl -s -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.assets[].name')
+
+          echo "Latest release assets: $LATEST_RELEASE_ASSETS"
+          echo "Expected zip filename: $ZIP_FILENAME"
+
+          if [[ "$LATEST_RELEASE_ASSETS" == *"$ZIP_FILENAME"* ]]; then
+            echo "::notice file=check_zip.sh::Latest version zip already exists in release."
+            echo "SKIP_ZIP_CREATION=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning file=check_zip.sh::Latest version zip NOT found in release. Proceeding with creation."
+            echo "SKIP_ZIP_CREATION=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Plugin Zip
+        # This step runs if not triggered by schedule, OR if triggered by schedule AND the zip doesn't exist
+        if: github.event_name != 'schedule' || steps.check_zip.outputs.SKIP_ZIP_CREATION == 'false'
+        run: |
+          # Use the extracted addon ID and version
+          ADDON_ID="${{ steps.get_addon_id.outputs.ADDON_ID }}"
+          ADDON_VERSION="${{ steps.get_addon_version.outputs.ADDON_VERSION }}"
+
+          # Create a temporary directory to build the zip from
+          TEMP_DIR="./$ADDON_ID"
+          mkdir -p "$TEMP_DIR"
+
+          # Copy all plugin files into the temporary directory
+          # Exclude .git and .github folders
+          rsync -av --exclude '.git/' --exclude '.github/' --exclude '*-release.zip' . "$TEMP_DIR"
+
+          # Zip the plugin, ensuring the addon ID is the root folder inside the zip
+          zip -r "$ADDON_ID-$ADDON_VERSION.zip" "$TEMP_DIR"
+
+          # Clean up the temporary directory
+          rm -rf "$TEMP_DIR"
+        working-directory: ./ # This ensures the zip is created in the repo root
+
+      - name: Upload Plugin Zip as Artifact
+        # This step only runs if the zip was actually created
+        if: github.event_name != 'schedule' || steps.check_zip.outputs.SKIP_ZIP_CREATION == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}-release
+          path: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}.zip
+
+      - name: Create or Update GitHub Release
+        # This step runs on push, release, or scheduled if a zip was created/missing
+        if: github.event_name != 'schedule' || steps.check_zip.outputs.SKIP_ZIP_CREATION == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_addon_version.outputs.ADDON_VERSION }}
+          name: Release ${{ steps.get_addon_version.outputs.ADDON_VERSION }}
+          body: Auto-generated release for version ${{ steps.get_addon_version.outputs.ADDON_VERSION }}
+          files: ${{ steps.get_addon_id.outputs.ADDON_ID }}-${{ steps.get_addon_version.outputs.ADDON_VERSION }}.zip
+          # If the release already exists, this will update it and add/replace the asset
+          prerelease: false
+          # You might want to set this if you want to explicitly target the latest tag as the 'latest' release
+          # latest: true # This might cause issues if you have pre-releases and specific latests. Be careful.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
