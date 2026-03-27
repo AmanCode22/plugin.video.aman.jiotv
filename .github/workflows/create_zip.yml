@@ -2,10 +2,7 @@ name: Create Kodi Plugin Zip (Store in Repo)
 
 on:
   release:
-    types: [published, edited] # This runs when a GitHub Release is pushed
-  push: # Trigger on push to any branch
-    branches:
-      - main # or your default branch, e.g., 'master', '*' for all branches
+    types: [published, edited] 
   workflow_dispatch: # This adds the "Run workflow" button in the GitHub UI
 
 jobs:
