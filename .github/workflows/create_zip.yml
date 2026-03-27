@@ -6,7 +6,6 @@ on:
   push: # Trigger on push to any branch
     branches:
       - main # or your default branch, e.g., 'master', '*' for all branches
-      - develop # Add other branches if you want builds for them
   workflow_dispatch: # This adds the "Run workflow" button in the GitHub UI
 
 jobs:
