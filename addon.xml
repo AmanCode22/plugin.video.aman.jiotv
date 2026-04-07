@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.aman.jiotv" name="JioTV" version="1.3" provider-name="AmanCode22">
+<addon id="plugin.video.aman.jiotv" name="JioTV" version="1.4" provider-name="AmanCode22">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
     <import addon="script.module.codequick" version="1.0.2"/>
@@ -18,6 +18,10 @@
     <platform>all</platform>
     <license>MIT</license>
     <news>
+[-1.4-]
+Fixed video stopping after approx 2 minutes.
+[-1.3-]
+Fixed bugs and updated APIs.
 [-1.2-]
 Added star channels.
 Disney and Hungama also added.
