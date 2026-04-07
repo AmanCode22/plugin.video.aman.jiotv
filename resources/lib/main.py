@@ -21,7 +21,21 @@ from resources.lib.utils import (
     verifyOTP,
 )
 from xbmcgui import Dialog
+from resources.lib.proxy_server import start_proxy, stop_proxy
+import threading
 
+_proxy_server = None
+_proxy_port = None
+_proxy_lock = threading.Lock()
+
+def get_or_start_proxy():
+    global _proxy_server, _proxy_port
+    with _proxy_lock:
+        if _proxy_server is None:
+            _proxy_server, _proxy_port = start_proxy()
+            xbmc.log("[JioTV] Proxy started on port %d" % _proxy_port, xbmc.LOGINFO)
+        return _proxy_server, _proxy_port
+        
 
 @Route.register
 def root(plugin):
@@ -220,6 +234,7 @@ def catchup_shows_list(plugin, day, id):
 
 @Resolver.register
 def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
+    get_or_start_proxy()
     if catchup:
         play_url = getCatchupUrl(id, srno, begin, end, showtime)
         cookies_part = play_url.split("?")[1]
@@ -230,24 +245,6 @@ def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
         else:
             cookie = cookies_part
         headers = jio_playheaders(cookie, id, srno)
-        header_str = urlencode(headers, quote_via=quote)
-        final = Listitem("video")
-        final.label = plugin._title
-        final.set_callback(play_url + f"|{header_str}&verifypeer=false")
-        final.property["isPlayable"] = True
-        final.property["inputstream"] = "inputstream.adaptive"
-        final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
-        final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
-        final.property["inputstream.adaptive.manifest_type"] = "hls"
-        final.property["inputstream.adaptive.license_type"] = "drm"
-        final.property["inputstream.adaptive.license_key"] = (
-            "|" + urlencode(headers) + "|R{SSM}|"
-        )
-        final.property["IsLive"] = "true"
-        # Add quality selector
-        final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
-
-        return final
     else:
         play_url = getLivePlayUrl(id)
         cookies_part = play_url.split("?")[1]
@@ -258,21 +255,19 @@ def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
         else:
             cookie = cookies_part
         headers = jio_playheaders(cookie, id, "250623144006")
-        header_str = urlencode(headers, quote_via=quote)
-        final = Listitem("video")
-        final.label = plugin._title
-        final.set_callback(play_url + f"|{header_str}&verifypeer=false")
-        final.property["isPlayable"] = True
-        final.property["inputstream"] = "inputstream.adaptive"
-        final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
-        final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
-        final.property["inputstream.adaptive.manifest_type"] = "hls"
-        final.property["inputstream.adaptive.license_type"] = "drm"
-        final.property["inputstream.adaptive.license_key"] = (
-            "|" + urlencode(headers) + "|R{SSM}|"
-        )
-
-        # Add quality selector
-        final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
-
-        return final
+    from urllib.parse import quote
+    proxy_url = f"http://127.0.0.1:{_proxy_port}/{quote(play_url, safe='')}"
+    final = Listitem("video")
+    final.label = plugin._title
+    final.set_callback(proxy_url)
+    final.property["isPlayable"] = True
+    final.property["inputstream"] = "inputstream.adaptive"
+    final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
+    final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
+    final.property["inputstream.adaptive.manifest_type"] = "hls"
+    final.property["inputstream.adaptive.license_type"] = "drm"
+    final.property["inputstream.adaptive.license_key"] = "|" + urlencode(headers) + "|R{SSM}|"
+    final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
+    if not catchup:
+        final.property["IsLive"] = "true"
+    return final
