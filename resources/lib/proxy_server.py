@@ -5,7 +5,7 @@ import threading
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, urlencode, quote
+from urllib.parse import urlparse, parse_qs, unquote, urlencode, quote
 import xbmc
 from resources.lib.utils import getLivePlayUrl, getCatchupUrl, jio_playheaders
 
@@ -17,12 +17,19 @@ class TokenRefreshProxy(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def do_GET(self):
-        original_url = self.path[1:] if self.path.startswith('/') else self.path
+    def do_HEAD(self):
+        self.do_GET(send_body=False)
+
+    def do_GET(self, send_body=True):
+        raw_path = unquote(self.path[1:] if self.path.startswith('/') else self.path)
+        if '|' in raw_path:
+            raw_path = raw_path.split('|')[0]
+        original_url = raw_path
+
         try:
             req = urllib.request.Request(original_url)
             for header, value in self.headers.items():
-                if header.lower() not in ('host', 'connection', 'proxy-connection'):
+                if header.lower() not in ('host', 'connection', 'proxy-connection', 'content-length'):
                     req.add_header(header, value)
             response = urllib.request.urlopen(req, timeout=self.timeout)
             self.send_response(response.getcode())
@@ -30,7 +37,8 @@ class TokenRefreshProxy(BaseHTTPRequestHandler):
                 if header.lower() not in ('content-encoding', 'transfer-encoding', 'connection'):
                     self.send_header(header, value)
             self.end_headers()
-            self.wfile.write(response.read())
+            if send_body:
+                self.wfile.write(response.read())
             response.close()
         except urllib.error.HTTPError as e:
             if e.code == 403:
@@ -40,7 +48,7 @@ class TokenRefreshProxy(BaseHTTPRequestHandler):
                     try:
                         req2 = urllib.request.Request(new_url)
                         for header, value in self.headers.items():
-                            if header.lower() not in ('host', 'connection', 'proxy-connection'):
+                            if header.lower() not in ('host', 'connection', 'proxy-connection', 'content-length'):
                                 req2.add_header(header, value)
                         response2 = urllib.request.urlopen(req2, timeout=self.timeout)
                         self.send_response(response2.getcode())
@@ -48,7 +56,8 @@ class TokenRefreshProxy(BaseHTTPRequestHandler):
                             if header.lower() not in ('content-encoding', 'transfer-encoding', 'connection'):
                                 self.send_header(header, value)
                         self.end_headers()
-                        self.wfile.write(response2.read())
+                        if send_body:
+                            self.wfile.write(response2.read())
                         response2.close()
                     except Exception:
                         self.send_error(500, "Refresh failed")
