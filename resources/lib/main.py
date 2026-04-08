@@ -163,13 +163,13 @@ def showPlayOptions(plugin, id, isCatchup):
     live = Listitem("video")
     live.label = "Watch Live"
     live.set_callback(play, id=id, catchup=False)
+    result = [live]
     if isCatchup:
         catchup = Listitem("video")
         catchup.label = "Watch Older Shows (Catchup)"
         catchup.set_callback(list_catchup_days, id=id)
-        return [live, catchup]
-    else:
-        return live
+        result.append(catchup)
+    return result
 
 @Route.register
 def list_catchup_days(plugin, id):
@@ -245,10 +245,10 @@ def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
     clean_url = play_url
     proxy_url = f"http://127.0.0.1:{_proxy_port}/{quote(clean_url, safe='')}"
 
-    final = Listitem("video")
+    final = Listitem()
     final.label = plugin._title
-    final.set_callback(proxy_url)
-    final.property["isPlayable"] = True
+    final.path = proxy_url
+    final.property["isPlayable"] = "true"
     final.property["inputstream"] = "inputstream.adaptive"
     final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
     final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
