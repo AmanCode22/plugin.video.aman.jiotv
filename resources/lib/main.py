@@ -3,6 +3,7 @@ from __future__ import unicode_literals
 
 import datetime
 import time
+import threading
 from urllib.parse import quote, urlencode
 
 import xbmc
@@ -22,7 +23,6 @@ from resources.lib.utils import (
 )
 from xbmcgui import Dialog
 from resources.lib.proxy_server import start_proxy, stop_proxy
-import threading
 
 _proxy_server = None
 _proxy_port = None
@@ -35,7 +35,6 @@ def get_or_start_proxy():
             _proxy_server, _proxy_port = start_proxy()
             xbmc.log("[JioTV] Proxy started on port %d" % _proxy_port, xbmc.LOGINFO)
         return _proxy_server, _proxy_port
-        
 
 @Route.register
 def root(plugin):
@@ -59,41 +58,40 @@ def root(plugin):
         result.append(logout_item)
     else:
         login_item = Listitem("video")
-        login_item.label = "Login(Needed for playing anything)"
+        login_item.label = "Login (Needed for playing anything)"
         login_item.set_callback(loginRoute)
         result.append(login_item)
     return result
-
 
 @Route.register
 def logoutRoute(plugin):
     logout()
     Script.notify("Logout successfully!", "Redirecting after logout")
-    xbmc.executebuiltin(
-        "RunPlugin(plugin://plugin.video.aman.jiotv/resources/lib/main.py?action=root)"
-    )
-
+    plugin.container.refresh()
 
 @Route.register
 def loginRoute(plugin):
-    number = str(Dialog().numeric(0, "Enter jio mobile number"))
+    number = Dialog().numeric(0, "Enter jio mobile number")
+    if not number:
+        Script.notify("Login cancelled", "No number entered")
+        return
+    number = str(number)
     otp_sent = sendOtp(number)
     if otp_sent:
         Script.notify("OTP SENT", "Otp sent successfully!")
-        otp = str(Dialog().numeric(0, "Enter OTP"))
+        otp = Dialog().numeric(0, "Enter OTP")
+        if not otp:
+            Script.notify("Login cancelled", "No OTP entered")
+            return
+        otp = str(otp)
         otp_verify = verifyOTP(number, otp)
         if otp_verify:
             Script.notify("Login Done", "Successfully logged in.")
-            xbmc.executebuiltin("ActivateWindow(Home)")
+            plugin.container.refresh()
         else:
             Script.notify("Failed Login", "Unable to verify otp")
-            xbmc.executebuiltin("ActivateWindow(Home)")
     else:
-        Script.notify(
-            "Failed Login", "Failed to send OTP. Non jio number or invalid number"
-        )
-        xbmc.executebuiltin("ActivateWindow(Home)")
-
+        Script.notify("Failed Login", "Failed to send OTP. Non jio number or invalid number")
 
 @Route.register
 def genreRoute(plugin):
@@ -106,7 +104,6 @@ def genreRoute(plugin):
         final.append(item)
     return final
 
-
 @Route.register
 def langenrRoute_langPart(plugin):
     final = []
@@ -117,7 +114,6 @@ def langenrRoute_langPart(plugin):
         item.set_callback(langenrRoute_genrePart, language=i)
         final.append(item)
     return final
-
 
 @Route.register
 def languageRoute(plugin):
@@ -130,7 +126,6 @@ def languageRoute(plugin):
         final.append(item)
     return final
 
-
 @Route.register
 def langenrRoute_genrePart(plugin, language):
     final = []
@@ -141,7 +136,6 @@ def langenrRoute_genrePart(plugin, language):
         item.set_callback(filter, type="multi", query=language, query2=i)
         final.append(item)
     return final
-
 
 @Route.register
 def filter(plugin, type, query, query2=""):
@@ -164,7 +158,6 @@ def filter(plugin, type, query, query2=""):
         final_data.append(item)
     return final_data
 
-
 @Route.register
 def showPlayOptions(plugin, id, isCatchup):
     live = Listitem("video")
@@ -172,17 +165,17 @@ def showPlayOptions(plugin, id, isCatchup):
     live.set_callback(play, id=id, catchup=False)
     if isCatchup:
         catchup = Listitem("video")
-        catchup.label = "Watch Older Shows Catchup"
+        catchup.label = "Watch Older Shows (Catchup)"
         catchup.set_callback(list_catchup_days, id=id)
         return [live, catchup]
-    return [live]
-
+    else:
+        return live
 
 @Route.register
 def list_catchup_days(plugin, id):
     final = []
     today = Listitem("video")
-    today.label = "Today's past programms"
+    today.label = "Today's past programmes"
     today.set_callback(catchup_shows_list, id=id, day=0)
     final.append(today)
     for i in range(1, 8):
@@ -191,7 +184,6 @@ def list_catchup_days(plugin, id):
         item.set_callback(catchup_shows_list, id=id, day=i * -1)
         final.append(item)
     return final
-
 
 @Route.register
 def catchup_shows_list(plugin, day, id):
@@ -203,18 +195,13 @@ def catchup_shows_list(plugin, day, id):
         item = Listitem("video")
         item.label = item.info.title = i["showname"]
         item.info.plot = (
-            "Showtime:"
-            + datetime.datetime.fromtimestamp((int(i["startEpoch"])) / 1000).strftime(
-                "%I:%M %p"
-            )
+            "Showtime: "
+            + datetime.datetime.fromtimestamp(int(i["startEpoch"]) / 1000).strftime("%I:%M %p")
             + " - "
-            + datetime.datetime.fromtimestamp((int(i["endEpoch"])) / 1000).strftime(
-                "%I:%M %p"
-            )
+            + datetime.datetime.fromtimestamp(int(i["endEpoch"]) / 1000).strftime("%I:%M %p")
         )
         item.art.clearart = item.art.clearlogo = (
-            "https://jiotv.catchup.cdn.jio.com/dare_images/images/"
-            + i["episodeThumbnail"]
+            "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["episodeThumbnail"]
         )
         item.art.fanart = item.art.icon = item.art.thumb = (
             "https://jiotv.catchup.cdn.jio.com/dare_images/shows/" + i["episodePoster"]
@@ -230,7 +217,6 @@ def catchup_shows_list(plugin, day, id):
         )
         final.append(item)
     return final
-
 
 @Resolver.register
 def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
@@ -255,8 +241,10 @@ def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
         else:
             cookie = cookies_part
         headers = jio_playheaders(cookie, id, "250623144006")
-    from urllib.parse import quote
-    proxy_url = f"http://127.0.0.1:{_proxy_port}/{quote(play_url, safe='')}"
+
+    clean_url = play_url
+    proxy_url = f"http://127.0.0.1:{_proxy_port}/{quote(clean_url, safe='')}"
+
     final = Listitem("video")
     final.label = plugin._title
     final.set_callback(proxy_url)
