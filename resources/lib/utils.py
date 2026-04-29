@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+from __future__ import unicode_literals
+
 import base64
 import datetime
 import json
@@ -5,7 +8,6 @@ import os
 import secrets
 import time
 import uuid
-from calendar import c
 
 import requests
 from codequick import Script
@@ -55,7 +57,7 @@ def isLoggedin():
 
 def getCreds():
     with PersistentDict("localdb") as db:
-        if time.time() - db.get("exp") >= TOKEN_EXPIRY:
+        if time.time() - db.get("exp", 0) >= TOKEN_EXPIRY:
             Script.notify(
                 "Login Refresh", "Refreshing token, old one expired.........."
             )
@@ -72,7 +74,6 @@ def convertEpoch(epoch):
 
 def getCatchupUrl(id, srno, begin, end, showtime):
     creds = getCreds()
-    print(creds)
     device_id = creds["deviceId"]
     crm = creds["sessionAttributes"]["user"]["subscriberId"]
     unique_id = creds["sessionAttributes"]["user"]["unique"]
@@ -114,9 +115,7 @@ def getCatchupUrl(id, srno, begin, end, showtime):
         "versioncode": "389",
         "content-length": str(len(payload)),
     }
-    print(headers)
     response = requests.post(url, data=payload, headers=headers).json()
-    print(response)
     return response["result"]
 
 
@@ -133,7 +132,7 @@ def jio_playheaders(cookie, channel_id, srno):
         "Accept-Encoding": "gzip, deflate",
         "os": "android",
         "appname": "RJIL_JioTV",
-        "subscriberid": "7393928868",
+        "subscriberid": crm,
         "accesstoken": access_token,
         "deviceid": device_id,
         "userid": userid,
@@ -165,12 +164,9 @@ def sendOtp(number):
         "os": "android",
         "m-rating": "100",
         "devicetype": "phone",
-        "content-type": "application/json; charset=utf-8",
     }
     response = requests.post(url, json=payload, headers=headers)
-    if response.text.strip() == "":
-        return True
-    return False
+    return response.text.strip() == ""
 
 
 def verifyOTP(number, otp):
@@ -187,7 +183,7 @@ def verifyOTP(number, otp):
             "info": {
                 "type": "android",
                 "platform": {"name": "cereus"},
-                "androidId": f"{secrets.randbits(64):016x}",
+                "androidId": "{:016x}".format(secrets.randbits(64)),
             },
         },
     }
@@ -199,13 +195,11 @@ def verifyOTP(number, otp):
         "os": "android",
         "m-rating": "100",
         "devicetype": "phone",
-        "content-type": "application/json; charset=utf-8",
     }
     verify_response = requests.post(
         verify_url, json=verify_payload, headers=verify_headers
     ).json()
     if verify_response.get("data", {}) == {}:
-        Script.notify("Login Failed invalid otp.")
         return False
     with PersistentDict("localdb") as db:
         db["creds"] = verify_response["data"]
@@ -215,8 +209,10 @@ def verifyOTP(number, otp):
 
 def logout():
     with PersistentDict("localdb") as db:
-        del db["creds"]
-        del db["exp"]
+        if "creds" in db:
+            del db["creds"]
+        if "exp" in db:
+            del db["exp"]
     return True
 
 
@@ -240,15 +236,6 @@ def getGenreList():
     }
 
 
-# with PersistentDict("localdb") as db:
-# if not db.get("genreList"):
-# api_data=json.loads(requests.get("https://jiotvapi.cdn.jio.com/apis/v1.3/dictionary/dictionary?langId=6",headers={"user-agent":"okhttp/4.11.0"}).content.decode("utf-8-sig"))
-# db["genreList"]=api_data["languageIdMapping"]
-# db["languageList"]=api_data["epgLanguageList"]
-# return api_data["epgGenreList"]
-# return db["genreList"]
-
-
 def getLanguageList():
     return {
         "1": "Hindi",
@@ -270,15 +257,6 @@ def getLanguageList():
     }
 
 
-# with PersistentDict("localdb") as db:
-# if not db.get("languageList"):
-# api_data=json.loads(requests.get("https://jiotvapi.cdn.jio.com/apis/v1.3/dictionary/dictionary?langId=6",headers={"user-agent":"okhttp/4.11.0"}).content.decode("utf-8-sig"))
-# db["genreList"]=api_data["channelCategoryMapping"]
-# db["languageList"]=api_data["epgLanguageList"]
-# return api_data["epgLanguageList"]
-# return db["languageList"]
-
-
 def getChannelList():
     with PersistentDict("localdb") as db:
         if not db.get("channelList"):
@@ -293,7 +271,6 @@ def getChannelList():
 
 def filterChannels(type, query, query2=""):
     channelList = getChannelList()
-    channelList.extend(give_star_channels())
     if type == "genre":
         finals = []
         genres = getGenreList()
@@ -370,321 +347,11 @@ def getLivePlayUrl(id):
     return response["result"]
 
 
-def give_star_channels():
-    return [
-        {
-            "channel_id": "1373",
-            "channel_name": "Disney Channel",
-            "logoUrl": "Disney_Channel.png",
-            "channelCategoryId": "7",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1374",
-            "channel_name": "Disney Junior",
-            "logoUrl": "Disney_Junior.png",
-            "channelCategoryId": "7",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1375",
-            "channel_name": "Disney International HD",
-            "logoUrl": "Disney_International_HD.png",
-            "channelCategoryId": "7",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1391",
-            "channel_name": "Hungama",
-            "logoUrl": "Hungama.png",
-            "channelCategoryId": "7",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1392",
-            "channel_name": "Super Hungama",
-            "logoUrl": "Super_Hungama.png",
-            "channelCategoryId": "7",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1132",
-            "channel_name": "Star Plus HD",
-            "logoUrl": "Star_Plus_HD.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1116",
-            "channel_name": "Star Plus",
-            "logoUrl": "Star_Plus.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "156",
-            "channel_name": "Star Gold HD",
-            "logoUrl": "Star_Gold_HD.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1151",
-            "channel_name": "Star Gold Romance",
-            "logoUrl": "Star_Gold_Romance.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1153",
-            "channel_name": "Star Gold Thrills",
-            "logoUrl": "Star_Gold_Thrills.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1154",
-            "channel_name": "Star Gold 2",
-            "logoUrl": "Star_Gold_2.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1155",
-            "channel_name": "Star Gold 2 HD",
-            "logoUrl": "Star_Gold_2_HD.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "931",
-            "channel_name": "Star Bharat HD",
-            "logoUrl": "Star_Bharat_HD.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1127",
-            "channel_name": "Star Bharat",
-            "logoUrl": "Star_Bharat.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1125",
-            "channel_name": "Star Gold",
-            "logoUrl": "Star_Gold.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1104",
-            "channel_name": "Star Movies HD",
-            "logoUrl": "Star_Movies_HD.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1115",
-            "channel_name": "Star Movies",
-            "logoUrl": "Star_Movies.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1110",
-            "channel_name": "Star Movies Select HD",
-            "logoUrl": "Star_Movies_Select_HD.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1113",
-            "channel_name": "Star Gold Select HD",
-            "logoUrl": "Star_Gold_Select_HD.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1120",
-            "channel_name": "Star Jalsha Movies HD",
-            "logoUrl": "Jalsha_Movies.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "5",
-        },
-        {
-            "channel_id": "1142",
-            "channel_name": "Star Sports 1",
-            "logoUrl": "Star_Sports_1.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1141",
-            "channel_name": "Star Sports 2",
-            "logoUrl": "Star_Sports_2.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "173",
-            "channel_name": "Star Sports 1 Hindi HD",
-            "logoUrl": "Star_Sports_HD1_Hindi.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1123",
-            "channel_name": "Star Sports Select 1",
-            "logoUrl": "Star_Sports_Select_1.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "300",
-            "channel_name": "Star Sports Select 1 HD",
-            "logoUrl": "Star_Sports_Select_HD_1.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1114",
-            "channel_name": "Star Sports Select 2",
-            "logoUrl": "Star_Sports_Select_2.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "301",
-            "channel_name": "Star Sports Select 2 HD",
-            "logoUrl": "Star_Sports_Select_HD_2.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1124",
-            "channel_name": "Star Sports 1 Tamil",
-            "logoUrl": "Star_Sports_1_Tamil.png",
-            "channelCategoryId": "8",
-            "channelLanguageId": "8",
-        },
-        {
-            "channel_id": "1136",
-            "channel_name": "Star Utsav Movies",
-            "logoUrl": "Star_Utsav_Movies.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1140",
-            "channel_name": "Star Suvarna Plus",
-            "logoUrl": "Star_Suvarna.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "13",
-        },
-        {
-            "channel_id": "1143",
-            "channel_name": "Star Utsav",
-            "logoUrl": "Star_Utsav.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "336",
-            "channel_name": "Star Pravah HD",
-            "logoUrl": "Star_Pravah_HD.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "2",
-        },
-        {
-            "channel_id": "1111",
-            "channel_name": "Star Maa Movies HD",
-            "logoUrl": "Maa_Movies_HD.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "11",
-        },
-        {
-            "channel_id": "1112",
-            "channel_name": "Star Maa HD",
-            "logoUrl": "Maa_HD.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "11",
-        },
-        {
-            "channel_id": "1129",
-            "channel_name": "Star Maa Music",
-            "logoUrl": "Maa_Music.png",
-            "channelCategoryId": "13",
-            "channelLanguageId": "11",
-        },
-        {
-            "channel_id": "368",
-            "channel_name": "Star Vijay HD",
-            "logoUrl": "Star_Vijay_HD.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "8",
-        },
-        {
-            "channel_id": "370",
-            "channel_name": "Suvarna HD",
-            "logoUrl": "Suvarna_HD.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "13",
-        },
-        {
-            "channel_id": "1117",
-            "channel_name": "Suvarna",
-            "logoUrl": "Suvarna.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "13",
-        },
-        {
-            "channel_id": "1119",
-            "channel_name": "Star Gold Select",
-            "logoUrl": "Star_Gold_Select.png",
-            "channelCategoryId": "6",
-            "channelLanguageId": "1",
-        },
-        {
-            "channel_id": "1121",
-            "channel_name": "Star Pravah",
-            "logoUrl": "Star_Pravah.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "2",
-        },
-        {
-            "channel_id": "1130",
-            "channel_name": "Star Vijay",
-            "logoUrl": "Star_Vijay.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "8",
-        },
-        {
-            "channel_id": "1131",
-            "channel_name": "Vijay Super",
-            "logoUrl": "Vijay_Super.png",
-            "channelCategoryId": "5",
-            "channelLanguageId": "8",
-        },
-        {
-            "channel_id": "1332",
-            "channel_name": "Nat Geo Wild HD",
-            "logoUrl": "Nat_Geo_Wild_HD.png",
-            "channelCategoryId": "10",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1335",
-            "channel_name": "National Geographic HD",
-            "logoUrl": "National_Geographic_HD.png",
-            "channelCategoryId": "10",
-            "channelLanguageId": "6",
-        },
-        {
-            "channel_id": "1406",
-            "channel_name": "National Geographic",
-            "logoUrl": "National_Geographic.png",
-            "channelCategoryId": "10",
-            "channelLanguageId": "6",
-        },
-    ]
+def _extract_cookie(play_url):
+    if "?" not in play_url:
+        return ""
+    qs = play_url.split("?", 1)[1]
+    if "bpk-tv" in play_url or "/HLS/" in play_url:
+        parts = qs.split("&", 1)
+        return parts[1] if len(parts) > 1 else qs
+    return qs

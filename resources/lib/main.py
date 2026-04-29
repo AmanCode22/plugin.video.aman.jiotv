@@ -3,10 +3,10 @@ from __future__ import unicode_literals
 
 import datetime
 import time
-import threading
 from urllib.parse import quote, urlencode
 
 import xbmc
+import xbmcgui
 from codequick import Listitem, Resolver, Route, Script, run
 from resources.lib.utils import (
     catchup_data,
@@ -20,21 +20,17 @@ from resources.lib.utils import (
     logout,
     sendOtp,
     verifyOTP,
+    _extract_cookie,
 )
-from xbmcgui import Dialog
-from resources.lib.proxy_server import start_proxy, stop_proxy
+from resources.lib.hls_proxy import start_hls_proxy, get_hls_proxy_port, set_playback_info
 
-_proxy_server = None
-_proxy_port = None
-_proxy_lock = threading.Lock()
+_proxy_started = False
 
-def get_or_start_proxy():
-    global _proxy_server, _proxy_port
-    with _proxy_lock:
-        if _proxy_server is None:
-            _proxy_server, _proxy_port = start_proxy()
-            xbmc.log("[JioTV] Proxy started on port %d" % _proxy_port, xbmc.LOGINFO)
-        return _proxy_server, _proxy_port
+def _ensure_proxy():
+    global _proxy_started
+    if not _proxy_started:
+        start_hls_proxy()
+        _proxy_started = True
 
 @Route.register
 def root(plugin):
@@ -58,40 +54,41 @@ def root(plugin):
         result.append(logout_item)
     else:
         login_item = Listitem("video")
-        login_item.label = "Login (Needed for playing anything)"
+        login_item.label = "Login(Needed for playing anything)"
         login_item.set_callback(loginRoute)
         result.append(login_item)
     return result
 
 @Route.register
 def logoutRoute(plugin):
-    logout()
-    Script.notify("Logout successfully!", "Redirecting after logout")
-    plugin.container.refresh()
+    try:
+        logout()
+        Script.notify("Logout successfully!", "Redirecting after logout")
+        xbmc.executebuiltin("RunPlugin(plugin://plugin.video.aman.jiotv/resources/lib/main.py?action=root)")
+    except:
+        Script.notify("Logout Error", "Please restart Kodi")
 
 @Route.register
 def loginRoute(plugin):
-    number = Dialog().numeric(0, "Enter jio mobile number")
-    if not number:
-        Script.notify("Login cancelled", "No number entered")
-        return
-    number = str(number)
-    otp_sent = sendOtp(number)
-    if otp_sent:
-        Script.notify("OTP SENT", "Otp sent successfully!")
-        otp = Dialog().numeric(0, "Enter OTP")
-        if not otp:
-            Script.notify("Login cancelled", "No OTP entered")
+    try:
+        number = str(xbmcgui.Dialog().numeric(0, "Enter jio mobile number"))
+        if not number:
             return
-        otp = str(otp)
-        otp_verify = verifyOTP(number, otp)
-        if otp_verify:
-            Script.notify("Login Done", "Successfully logged in.")
-            plugin.container.refresh()
+        otp_sent = sendOtp(number)
+        if otp_sent:
+            Script.notify("OTP SENT", "Otp sent successfully!")
+            otp = str(xbmcgui.Dialog().numeric(0, "Enter OTP"))
+            if not otp:
+                return
+            if verifyOTP(number, otp):
+                Script.notify("Login Done", "Successfully logged in.")
+                xbmc.executebuiltin("ActivateWindow(Home)")
+            else:
+                Script.notify("Failed Login", "Unable to verify otp")
         else:
-            Script.notify("Failed Login", "Unable to verify otp")
-    else:
-        Script.notify("Failed Login", "Failed to send OTP. Non jio number or invalid number")
+            Script.notify("Failed Login", "Failed to send OTP")
+    except Exception as e:
+        Script.notify("Login Error", str(e))
 
 @Route.register
 def genreRoute(plugin):
@@ -144,44 +141,43 @@ def filter(plugin, type, query, query2=""):
     for i in filtered_data:
         item = Listitem("video")
         item.label = i["channel_name"]
-        item.art.fanart = item.art.thumb = item.art.clearart = item.art.clearlogo = (
-            "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["logoUrl"]
-        )
-        item.art.icon = (
-            "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["logoUrl"]
-        )
-        item.set_callback(
-            showPlayOptions,
-            id=i["channel_id"],
-            isCatchup=bool(i.get("stbCatchup", False)),
-        )
+        item.art.fanart = item.art.thumb = item.art.clearart = item.art.clearlogo = "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["logoUrl"]
+        item.art.icon = "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["logoUrl"]
+        item.set_callback(showPlayOptions, id=i["channel_id"], name=i["channel_name"], isCatchup=bool(i.get("stbCatchup", False)))
         final_data.append(item)
     return final_data
 
 @Route.register
-def showPlayOptions(plugin, id, isCatchup):
-    live = Listitem("video")
-    live.label = "Watch Live"
-    live.set_callback(play, id=id, catchup=False)
-    result = [live]
-    if isCatchup:
-        catchup = Listitem("video")
-        catchup.label = "Watch Older Shows (Catchup)"
-        catchup.set_callback(list_catchup_days, id=id)
-        result.append(catchup)
-    return result
+def showPlayOptions(plugin, id, name, isCatchup):
+    if not isCatchup:
+        live_item = Listitem()
+        live_item.label = "Watch Live"
+        live_item.set_callback(play_resolver, channel_id=id, catchup=False)
+        return [live_item]
+    dialog = xbmcgui.Dialog()
+    opts = ["Watch Live", "Watch Catchup"]
+    choice = dialog.select(name, opts)
+    if choice == -1:
+        return []
+    elif choice == 0:
+        live_item = Listitem()
+        live_item.label = "Watch Live"
+        live_item.set_callback(play_resolver, channel_id=id, catchup=False)
+        return [live_item]
+    else:
+        return list_catchup_days(plugin, channel_id=id)
 
 @Route.register
-def list_catchup_days(plugin, id):
+def list_catchup_days(plugin, channel_id):
     final = []
     today = Listitem("video")
-    today.label = "Today's past programmes"
-    today.set_callback(catchup_shows_list, id=id, day=0)
+    today.label = "Today's past programms"
+    today.set_callback(catchup_shows_list, id=channel_id, day=0)
     final.append(today)
     for i in range(1, 8):
         item = Listitem("video")
         item.label = str(i) + " day older"
-        item.set_callback(catchup_shows_list, id=id, day=i * -1)
+        item.set_callback(catchup_shows_list, id=channel_id, day=i * -1)
         final.append(item)
     return final
 
@@ -194,68 +190,56 @@ def catchup_shows_list(plugin, day, id):
             continue
         item = Listitem("video")
         item.label = item.info.title = i["showname"]
-        item.info.plot = (
-            "Showtime: "
-            + datetime.datetime.fromtimestamp(int(i["startEpoch"]) / 1000).strftime("%I:%M %p")
-            + " - "
-            + datetime.datetime.fromtimestamp(int(i["endEpoch"]) / 1000).strftime("%I:%M %p")
-        )
-        item.art.clearart = item.art.clearlogo = (
-            "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["episodeThumbnail"]
-        )
-        item.art.fanart = item.art.icon = item.art.thumb = (
-            "https://jiotv.catchup.cdn.jio.com/dare_images/shows/" + i["episodePoster"]
-        )
-        item.set_callback(
-            play,
-            id=id,
-            catchup=True,
-            srno=i["srno"],
-            showtime=i["showtime"],
-            begin=i["startEpoch"],
-            end=i["endEpoch"],
-        )
+        start = datetime.datetime.fromtimestamp(int(i["startEpoch"]) / 1000).strftime("%I:%M %p")
+        end = datetime.datetime.fromtimestamp(int(i["endEpoch"]) / 1000).strftime("%I:%M %p")
+        item.info.plot = "Showtime:" + start + " - " + end
+        item.art.clearart = item.art.clearlogo = "https://jiotv.catchup.cdn.jio.com/dare_images/images/" + i["episodeThumbnail"]
+        item.art.fanart = item.art.icon = item.art.thumb = "https://jiotv.catchup.cdn.jio.com/dare_images/shows/" + i["episodePoster"]
+        item.set_callback(play_resolver, channel_id=id, catchup=True, srno=i["srno"], showtime=i["showtime"], begin=i["startEpoch"], end=i["endEpoch"])
         final.append(item)
     return final
 
 @Resolver.register
-def play(plugin, id, catchup, srno=None, showtime=None, begin=None, end=None):
-    get_or_start_proxy()
-    if catchup:
-        play_url = getCatchupUrl(id, srno, begin, end, showtime)
-        cookies_part = play_url.split("?")[1]
-        if "bpk-tv" in cookies_part:
-            cookie = "_" + cookies_part.split("&_")[1]
-        elif "/HLS/" in cookies_part:
-            cookie = "_" + cookies_part.split("&_")[1]
+def play_resolver(plugin, channel_id, catchup, srno=None, showtime=None, begin=None, end=None):
+    _ensure_proxy()
+    try:
+        if catchup:
+            play_url = getCatchupUrl(channel_id, srno, begin, end, showtime)
+            cookie = _extract_cookie(play_url)
+            headers = jio_playheaders(cookie, channel_id, srno)
         else:
-            cookie = cookies_part
-        headers = jio_playheaders(cookie, id, srno)
-    else:
-        play_url = getLivePlayUrl(id)
-        cookies_part = play_url.split("?")[1]
-        if "bpk-tv" in cookies_part:
-            cookie = "_" + cookies_part.split("&_")[1]
-        elif "/HLS/" in cookies_part:
-            cookie = "_" + cookies_part.split("&_")[1]
-        else:
-            cookie = cookies_part
-        headers = jio_playheaders(cookie, id, "250623144006")
-
-    clean_url = play_url
-    proxy_url = f"http://127.0.0.1:{_proxy_port}/{quote(clean_url, safe='')}"
-
-    final = Listitem()
-    final.label = plugin._title
-    final.path = proxy_url
-    final.property["isPlayable"] = "true"
-    final.property["inputstream"] = "inputstream.adaptive"
-    final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
-    final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
-    final.property["inputstream.adaptive.manifest_type"] = "hls"
-    final.property["inputstream.adaptive.license_type"] = "drm"
-    final.property["inputstream.adaptive.license_key"] = "|" + urlencode(headers) + "|R{SSM}|"
-    final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
-    if not catchup:
-        final.property["IsLive"] = "true"
-    return final
+            play_url = getLivePlayUrl(channel_id)
+            cookie = _extract_cookie(play_url)
+            headers = jio_playheaders(cookie, channel_id, "250623144006")
+        if not play_url:
+            Script.notify("Error", "Failed to get stream URL")
+            return None
+        
+        set_playback_info({
+            'channel_id': channel_id,
+            'is_catchup': catchup,
+            'srno': srno,
+            'showtime': showtime,
+            'begin': begin,
+            'end': end
+        })
+        
+        port = get_hls_proxy_port()
+        proxy_url = "http://127.0.0.1:" + str(port) + "/" + quote(play_url, safe="")
+        
+        header_str = urlencode(headers, quote_via=quote)
+        
+        final = Listitem()
+        final.label = plugin._title if hasattr(plugin, '_title') else "JioTV"
+        final.set_path(proxy_url + "|" + header_str)
+        final.property["isPlayable"] = True
+        final.property["inputstream"] = "inputstream.adaptive"
+        final.property["inputstream.adaptive.stream_headers"] = urlencode(headers)
+        final.property["inputstream.adaptive.manifest_headers"] = urlencode(headers)
+        final.property["inputstream.adaptive.stream_selection_type"] = "ask-quality"
+        if not catchup:
+            final.property["IsLive"] = "true"
+        return final
+    except Exception as e:
+        Script.notify("Play Error", str(e))
+        return None
