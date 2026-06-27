@@ -1,8 +1,8 @@
 # Project Archiving
-This project would be archived soon, if anyone want to contribute can open pull request.
-After 10 July , I would archive it.
-Due to 2 minute expiry issue, this plugin in no longer fully functional.
-I don't have time to fix the issue as it would neeed to make a custom proxy for kodi plugin and use it to play.
+
+This project is archived. Due to 2 minute expiry issue, this plugin was no longer fully functional.
+I don't had time to fix the issue as it would have needed to make a custom proxy for kodi plugin and use it to play.
+Also jiotv became an non free ott app where most channels needed plans due to which there was no use of plugin 
 
 # JioTV plugin
 This plugin supports jiotv playback in kodi with catchup. Sony channels due to recent changes requires premium specific plans, so if anyone have pubads or dai link for sony channels kindly open a issue with feature request tag and i would add them in the plugin.
